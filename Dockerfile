@@ -1,44 +1,43 @@
-FROM ubuntu:22.04
+FROM debian:12-slim
 
-ENV TIMEZONE=Europe/Rome \
-    DEBIAN_FRONTEND=noninteractive
+ENV TIMEZONE=Europe/Rome
+ENV DEBIAN_FRONTEND=noninteractive
+ENV WINEARCH=win64
+ENV WINEDEBUG=-all
+ENV WINEPREFIX=/root/server
 
-RUN apt update && \
-    dpkg --add-architecture i386 && \
-    apt install -y software-properties-common
+# crudini to edit ini files
+# curl to get the server IP
+# wget and gnupg2 to install wine
+RUN apt update \
+    && apt install -y curl gnupg2 wget crudini
 
-RUN set -x \
-    && echo steam steam/question select "I AGREE" | debconf-set-selections
+# Install steamcmd to be able to install or update astroneer server
+# https://developer.valvesoftware.com/wiki/SteamCMD#Debian
+# https://stackoverflow.com/a/77853830
+RUN echo "deb http://ftp.us.debian.org/debian bookworm main non-free" > /etc/apt/sources.list.d/non-free.list \
+    && apt update \
+    && apt install -y software-properties-common \
+    && apt-add-repository non-free \
+    && dpkg --add-architecture i386 \
+    && apt update \
+    && echo steam steam/question select "I AGREE" | debconf-set-selections \
+    && apt install -y steamcmd
 
-RUN add-apt-repository -y multiverse && \
-    apt install -y flatpak lib32gcc-s1 steamcmd
+# https://wiki.winehq.org/Debian
+# Install wine to launch the game
+RUN mkdir -pm755 /etc/apt/keyrings \
+    && wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key \
+    && wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources \
+    && apt update \
+    && apt install -y --install-recommends winehq-stable
 
-RUN \
-    /usr/games/steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir /astroneer +login anonymous +app_update 728470 validate +quit
+RUN wget https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks \
+    && chmod +x winetricks \
+    && apt install -y pulseaudio \
+    && ./winetricks sound=pulse \
+    && usermod -aG pulse,pulse-access root
 
-RUN \
-    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo \
-    && flatpak install -y com.valvesoftware.Steam.CompatibilityTool.Proton-GE
+ADD entrypoint.sh /entrypoint.sh
 
-ENV STEAM_COMPAT_CLIENT_INSTALL_PATH=$HOME/.steam/steam/ \
-  STEAM_COMPAT_DATA_PATH=$HOME/.steam/steam/steamapps/compatdata/728470
-
-RUN mkdir -p $STEAM_COMPAT_DATA_PATH
-
-
-RUN apt install -y winetricks pulseaudio curl crudini
-
-RUN winetricks sound=pulse
-
-RUN usermod -aG pulse,pulse-access root
-
-EXPOSE 30877/tcp
-EXPOSE 30877/udp
-
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-VOLUME ["/astroneer/Astro/Saved/SaveGames"]
-
-ENTRYPOINT ["/entrypoint.sh"]
-
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
